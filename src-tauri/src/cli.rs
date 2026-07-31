@@ -401,6 +401,11 @@ pub fn permission_response(request_id: &str, allow: bool, input: Value) -> Strin
 
 fn push_error_line(target: &mut String, line: &str) {
     let line = line.trim();
+    // `-p` requests can legitimately have no permission response. Claude CLI
+    // prints this advisory after three seconds; it is not a request failure.
+    if line.starts_with("Warning: no stdin data received in 3s") {
+        return;
+    }
     if !line.is_empty() && !target.lines().any(|existing| existing == line) {
         target.push_str(line);
         target.push('\n');
@@ -417,7 +422,7 @@ fn emit(app: &AppHandle, conversation_id: &str, run_id: &str, event: &str, data:
 mod tests {
     use super::{
         api_retry_status, next_progress_deadline, permission_response, should_close_stdin,
-        ParseOutcome, ACTIVE_PROGRESS_TIMEOUT, INITIAL_PROGRESS_TIMEOUT,
+        push_error_line, ParseOutcome, ACTIVE_PROGRESS_TIMEOUT, INITIAL_PROGRESS_TIMEOUT,
     };
     use serde_json::{json, Value};
     use std::time::Duration;
@@ -478,6 +483,14 @@ mod tests {
         let retry = ParseOutcome { api_retry: true, ..ParseOutcome::default() };
         assert_eq!(next_progress_deadline(now + ACTIVE_PROGRESS_TIMEOUT, now, &retry), initial);
         assert_eq!(next_progress_deadline(now + Duration::from_secs(30), now, &retry), now + Duration::from_secs(30));
+    }
+
+    #[test]
+    fn ignores_cli_stdin_advisory_in_error_diagnostics() {
+        let mut error = String::new();
+        push_error_line(&mut error, "Warning: no stdin data received in 3s, proceeding without it.");
+        push_error_line(&mut error, "API Error: 400 The request body is invalid.");
+        assert_eq!(error, "API Error: 400 The request body is invalid.\n");
     }
 
 }

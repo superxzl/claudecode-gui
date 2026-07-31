@@ -49,6 +49,7 @@ Tauri Rust process
 - 实时输入会在最终 `message_delta.stop_reason` 到达时关闭；CLI 随后发送 `result` 并退出，GUI 再结束“回答中”状态。不能等待 `result` 后才关闭 stdin，否则双方会互相等待。
 - 主请求使用 Claude CLI 原生 `-p <prompt>` 参数，输出仍采用 `stream-json`；只有 `default` 权限模式保留 stdin 用于 control response，其他模式发送后立即 EOF。
 - 运行监管使用分阶段绝对截止时间：首次有效产出最多等待 120 秒；已有正文、工具、权限请求或最终结果后，无有效进展窗口延长到 5 分钟；整轮最长 10 分钟。`system/api_retry` 只更新“上游服务重试中”状态，并把剩余等待收紧到最多 120 秒，后续重试事件不会延长截止时间。这样既避免网关持续报错时永久停在“正在思考”，也不会在大型工具结果返回后过早杀死仍在继续推理的 CLI。
+- Claude CLI 在 `-p` 模式下可能因为等待权限响应而向 stderr 输出 `no stdin data received in 3s` 提示；该提示不是失败原因，Rust 诊断层会过滤它，但保留真正的 400/502 和模型错误。
 
 ### 数据模型
 
