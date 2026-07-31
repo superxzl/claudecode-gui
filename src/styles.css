@@ -16,6 +16,7 @@
   --accent: #d97757;
   --green: #2da66f;
   --red: #e0675e;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -217,4 +218,51 @@ button { color: inherit; }
   .config-form { grid-template-columns: 1fr; }
   .composer-model select { max-width: 130px; }
   .search-backdrop { padding: 64px 10px 10px; }.search-dialog { max-height: calc(100vh - 74px); }
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color: #202124;
+    background: #f7f7f6;
+    color-scheme: light;
+    --bg: #f7f7f6;
+    --sidebar: #ececea;
+    --panel: #ffffff;
+    --panel-soft: #f1f1ef;
+    --line: #d8d8d4;
+    --line-soft: #e5e5e2;
+    --text: #202124;
+    --muted: #666964;
+    --dim: #858782;
+    --green: #237a52;
+    --red: #ba4a43;
+  }
+
+  .brand-mark, .search-result-icon, .empty-icon { background: #e2e2df; }
+  .icon-button, .section-label, .session-copy small, .cli-status small, .topbar-empty, .skills-heading p,
+  .skill-copy small, .skills-empty, .config-field small, .config-note, .message-author, .message-duration,
+  .tool-summary, .live-tool, .muted, .context-label, .composer-model, .search-result-header,
+  .search-result-copy p, .search-result-copy small { color: #70736e; }
+  .icon-button:hover, .session-item.active .session-copy > span, .nav-command:hover, .nav-command.active,
+  .nav-command:first-child, .conversation-start h1 { color: #181918; }
+  .icon-button:hover, .session-item:hover, .session-item.active, .nav-command:hover, .nav-command.active,
+  .cli-status:hover, .cli-status.active { background: #dededb; }
+  .icon-button.framed, .location-button, .skill-item, .config-field input, .config-note,
+  .message, .message.assistant, .starter-grid button, .empty-state button, .tool-row pre,
+  .permission-tool { background: #ffffff; }
+  .popover, .search-dialog, .permission-dialog, .composer, .message.user { background: #f0f0ed; }
+  .popover button:hover { background: #f7e6e4; }
+  .nav-command, .session-copy > span, .project-path, .location-button, .topbar-title, .skills-heading span,
+  .skill-title strong, .config-heading h2, .config-field > span, .config-field input, .config-note strong,
+  .message-body, .message-body h1, .message-body h2, .message-body h3, .composer textarea,
+  .search-input-row input, .search-result-copy strong { color: #202124; }
+  .skill-item:hover, .starter-grid button:hover, .config-field input:focus { background: #f8f8f6; }
+  .composer-wrap { background: linear-gradient(to bottom, rgba(247,247,246,0), #f7f7f6 22%); }
+  .composer-permission select option, .composer-model select option { background: #ffffff; color: #202124; }
+  .message-body pre { background: #f6f6f4 !important; }
+  .message-body :not(pre) > code { border-color: #d8d8d4; background: #ececea; color: #30322f; }
+  .inline-error, .error-toast { border-color: #e1b6b1; background: #fff1ef; color: #a93f39; }
+  .search-backdrop, .modal-backdrop { background: rgba(34,35,33,.28); }
+  .dialog-actions .secondary { border-color: #ccccca; background: #eeeeeb; color: #202124; }
+  .dialog-actions .primary, .config-actions button { border-color: #292a28; background: #292a28; color: #ffffff; }
 }

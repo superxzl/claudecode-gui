@@ -20,6 +20,7 @@
 - `react-markdown` + `remark-gfm`：Markdown/GFM 渲染。
 - `react-syntax-highlighter` + Prism：代码块高亮。
 - `lucide-react`：导航、搜索、文件、模型、配置等图标。
+- Vitest + Testing Library + jsdom：验证输入区键盘行为、自适应高度和消息 Markdown/耗时展示。
 
 ### Tauri/Rust 组件
 
@@ -39,19 +40,23 @@
 | --- | --- | --- |
 | `--permission-mode manual` 报参数无效 | 当前 CLI 只接受 `default`、`acceptEdits`、`bypassPermissions`、`dontAsk`、`plan`、`auto` | 数据迁移和后端规范化把旧值 `manual` 转为 `default`；加入 Rust 测试 |
 | 首轮发送后长期显示“正在思考” | `--input-format stream-json` 在当前 CLI 环境中静默等待 | 改用 `claude -p <prompt> --output-format stream-json --include-partial-messages`，stdin 只保留权限响应 |
-| Claude 已回答但 GUI 仍显示运行中 | 只等待 `result` 才结束输入会造成双方互等 | 在最终 `message_delta.stop_reason` 到达时关闭 stdin，并处理 `completed/error/cancelled`；增加 120 秒无有效进展和 10 分钟整轮看门狗 |
+| Claude 已回答但 GUI 仍显示运行中 | 只等待 `result` 才结束输入会造成双方互等 | 在最终 `message_delta.stop_reason` 到达时关闭 stdin，并处理 `completed/error/cancelled`；增加分阶段无进展和 10 分钟整轮看门狗 |
 | 失败首轮后下一轮错误使用 `--resume` | GUI 过早假定 Claude session 已初始化 | 只有收到 `system/init` 才标记可恢复，并增加恢复状态字段 |
 | 多个 Claude 安装导致参数/流行为不一致 | GUI PATH 与终端 PATH 不同，Homebrew 旧版本可能被优先选中 | 收集候选并选择版本最高者，支持 `CLAUDE_DESK_CLI` 显式指定；用实际 CLI 版本检查 |
 | 模型下拉只显示别名 | Claude 配置中的别名映射没有进入前端 | 增加安全配置 IPC，显示真实模型 ID；保存时只更新模型字段，测试认证令牌和未知字段保持不变 |
 | Skills 列表容易混入未安装插件市场内容 | 直接递归扫描插件市场目录会把缓存/源码误判为已安装 | 仅扫描 `.claude/skills` 和 `installed_plugins.json` 中的 `installPath`，按 canonical path 去重 |
 | 搜索初版只能过滤当前会话标题 | 前端没有历史消息索引 | 将标题、项目路径和消息正文查询放入 SQLite，增加 LIKE 通配符转义、摘要截断和查询测试 |
 | UI 与 Codex 风格不一致 | 早期只做了局部颜色调整 | 重建侧栏、聊天消息方向、配置/Skills 页面和固定输入区，并做前端构建检查 |
-| 网关异常时长期显示“正在思考” | Claude CLI 遇到 502 会持续产生重试事件，旧的 180 秒计时器在每次事件后重新创建 | 识别 `system/api_retry` 并显示真实重试状态；改为 120 秒无有效进展和 10 分钟整轮上限两个绝对截止时间，重试日志不再延长等待 |
+| 网关异常时长期显示“正在思考” | Claude CLI 遇到 502 会持续产生重试事件，旧的 180 秒计时器在每次事件后重新创建 | 识别 `system/api_retry` 并显示真实重试状态；API 重试最多等待 120 秒、整轮上限 10 分钟，重试日志不再延长等待 |
+| 大型工具结果后被误判为卡死 | 工具执行已经完成，但高推理模型读取大量结果后的下一次输出可能超过 120 秒 | 首次响应仍限制 120 秒；一旦有真实工具或正文进展，空闲窗口延长到 5 分钟；API 重试仍最多等待 120 秒 |
+| 运行结束后工具条目重复出现 | 结束事件重新加载持久化工具记录，但未清理 Zustand 中同一轮实时工具 | 在完成、错误、取消和启动失败时清空该会话的实时工具列表 |
+| 单文件组件职责过多 | `App.tsx` 同时包含 Markdown、消息、Skills、配置和输入区实现 | 拆分为独立组件，`App.tsx` 只保留页面状态装配和布局协调，并为可独立验证的组件补测试 |
 
 ## 4. 检查方式
 
-- `npm run check`：TypeScript、Vite 生产构建和 Rust `cargo check`。
-- `cargo test --manifest-path src-tauri/Cargo.toml`：CLI 协议、配置字段保护、Skills 元数据、SQLite 搜索共 8 个测试。
+- `npm run check`：3 项 Vitest 组件测试、TypeScript、Vite 生产构建和 Rust `cargo check`。
+- `cargo test --manifest-path src-tauri/Cargo.toml`：CLI 协议、分阶段 deadline、配置字段保护、Skills 元数据、SQLite 搜索共 10 个测试。
+- 使用本机 Claude CLI 做真实协议验证：首轮流式正文、`Read` 工具事件、工具结果、同 session 的 `--resume` 和二轮最终正文均成功。
 - `npm run tauri build`：已在 Apple Silicon macOS 生成 `.app` 和 `.dmg`，并用 `file`、`codesign` 检查架构和签名状态。
 - 运行中的开发服务保持在 `http://localhost:1420/`，Tauri 热重载进程能够重新启动。
 

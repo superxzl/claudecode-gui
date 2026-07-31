@@ -20,13 +20,25 @@ pub struct RunningProcess {
 
 pub type RunningMap = Arc<Mutex<HashMap<String, RunningProcess>>>;
 
-const NO_PROGRESS_TIMEOUT: Duration = Duration::from_secs(120);
+const INITIAL_PROGRESS_TIMEOUT: Duration = Duration::from_secs(120);
+const ACTIVE_PROGRESS_TIMEOUT: Duration = Duration::from_secs(300);
 const RUN_TIMEOUT: Duration = Duration::from_secs(600);
 
 #[derive(Default)]
 struct ParseOutcome {
     close_input: bool,
     made_progress: bool,
+    api_retry: bool,
+}
+
+fn next_progress_deadline(current: Instant, now: Instant, outcome: &ParseOutcome) -> Instant {
+    if outcome.made_progress {
+        now + ACTIVE_PROGRESS_TIMEOUT
+    } else if outcome.api_retry {
+        current.min(now + INITIAL_PROGRESS_TIMEOUT)
+    } else {
+        current
+    }
 }
 
 pub async fn discover_claude() -> CliStatus {
@@ -164,7 +176,9 @@ pub async fn start_run(
         let mut stdout_open = true;
         let mut stderr_open = true;
         let hard_deadline = started_at + RUN_TIMEOUT;
-        let mut progress_deadline = started_at + NO_PROGRESS_TIMEOUT;
+        let mut progress_deadline = started_at + INITIAL_PROGRESS_TIMEOUT;
+        let mut had_progress = false;
+        let mut retrying_api = false;
 
         loop {
             tokio::select! {
@@ -179,14 +193,18 @@ pub async fn start_run(
                     let _ = stdin.write_all(input.as_bytes()).await;
                     let _ = stdin.write_all(b"\n").await;
                     let _ = stdin.flush().await;
-                    progress_deadline = Instant::now() + NO_PROGRESS_TIMEOUT;
+                    progress_deadline = Instant::now() + ACTIVE_PROGRESS_TIMEOUT;
                 }
                 line = stdout_lines.next_line(), if stdout_open => match line {
                     Ok(Some(line)) => {
                         let outcome = parse_line(&app, &database, &task_conversation_id, &task_run_id, &line, &mut answer, &mut terminal_error);
+                        had_progress |= outcome.made_progress;
                         if outcome.made_progress {
-                            progress_deadline = Instant::now() + NO_PROGRESS_TIMEOUT;
+                            retrying_api = false;
+                        } else if outcome.api_retry {
+                            retrying_api = true;
                         }
+                        progress_deadline = next_progress_deadline(progress_deadline, Instant::now(), &outcome);
                         if outcome.close_input {
                             let _ = stdin.shutdown().await;
                         }
@@ -220,7 +238,13 @@ pub async fn start_run(
                     break;
                 }
                 _ = tokio::time::sleep_until(progress_deadline) => {
-                    terminal_error = "Claude CLI 在 120 秒内没有产生回答或其他有效进展，已自动终止。若界面曾显示上游重试，请检查推理网关、网络或 CLI 登录状态。".into();
+                    terminal_error = if retrying_api {
+                        "上游推理服务持续重试 120 秒仍未恢复，Claude CLI 已自动终止。请检查推理网关或网络状态。".into()
+                    } else if !had_progress {
+                        "Claude CLI 长时间没有继续输出，已自动终止。首次响应和上游重试最多等待 120 秒；工具执行后的继续推理最多等待 5 分钟。请检查推理网关、网络、CLI 登录或 MCP 状态。".into()
+                    } else {
+                        "Claude CLI 在已有有效进展后 5 分钟没有继续输出，已自动终止。请检查工具调用、MCP 或推理服务状态。".into()
+                    };
                     let _ = child.start_kill();
                     break;
                 }
@@ -260,12 +284,13 @@ fn parse_line(
 ) -> ParseOutcome {
     let Ok(value) = serde_json::from_str::<Value>(line) else { return ParseOutcome::default() };
     let event_type = value.get("type").and_then(Value::as_str).unwrap_or_default();
-    let mut outcome = ParseOutcome { close_input: should_close_stdin(&value), made_progress: false };
+    let mut outcome = ParseOutcome { close_input: should_close_stdin(&value), made_progress: false, api_retry: false };
     if event_type == "system" && value.get("subtype").and_then(Value::as_str) == Some("init") {
         let _ = database.mark_claude_initialized(conversation_id);
         outcome.made_progress = true;
     } else if let Some(message) = api_retry_status(&value) {
         let _ = emit(app, conversation_id, run_id, "status", json!({ "message": message }));
+        outcome.api_retry = true;
     } else if event_type == "stream_event" {
         let event = &value["event"];
         match event.get("type").and_then(Value::as_str).unwrap_or_default() {
@@ -390,8 +415,13 @@ fn emit(app: &AppHandle, conversation_id: &str, run_id: &str, event: &str, data:
 
 #[cfg(test)]
 mod tests {
-    use super::{api_retry_status, permission_response, should_close_stdin};
+    use super::{
+        api_retry_status, next_progress_deadline, permission_response, should_close_stdin,
+        ParseOutcome, ACTIVE_PROGRESS_TIMEOUT, INITIAL_PROGRESS_TIMEOUT,
+    };
     use serde_json::{json, Value};
+    use std::time::Duration;
+    use tokio::time::Instant;
 
     #[test]
     fn closes_input_on_final_message_delta() {
@@ -436,6 +466,18 @@ mod tests {
             Some("上游推理服务暂时不可用，Claude CLI 正在第 3 次重试...")
         );
         assert!(api_retry_status(&json!({ "type": "system", "subtype": "init" })).is_none());
+    }
+
+    #[test]
+    fn valid_work_extends_idle_window_but_retries_never_extend_it() {
+        let now = Instant::now();
+        let initial = now + INITIAL_PROGRESS_TIMEOUT;
+        let progress = ParseOutcome { made_progress: true, ..ParseOutcome::default() };
+        assert_eq!(next_progress_deadline(initial, now, &progress), now + ACTIVE_PROGRESS_TIMEOUT);
+
+        let retry = ParseOutcome { api_retry: true, ..ParseOutcome::default() };
+        assert_eq!(next_progress_deadline(now + ACTIVE_PROGRESS_TIMEOUT, now, &retry), initial);
+        assert_eq!(next_progress_deadline(now + Duration::from_secs(30), now, &retry), now + Duration::from_secs(30));
     }
 
 }

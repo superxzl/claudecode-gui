@@ -1,25 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import ReactMarkdown from "react-markdown";
-import { PrismLight as SyntaxHighlighter } from "react-syntax-highlighter";
-import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
-import bash from "react-syntax-highlighter/dist/esm/languages/prism/bash";
-import css from "react-syntax-highlighter/dist/esm/languages/prism/css";
-import javascript from "react-syntax-highlighter/dist/esm/languages/prism/javascript";
-import json from "react-syntax-highlighter/dist/esm/languages/prism/json";
-import markup from "react-syntax-highlighter/dist/esm/languages/prism/markup";
-import python from "react-syntax-highlighter/dist/esm/languages/prism/python";
-import rust from "react-syntax-highlighter/dist/esm/languages/prism/rust";
-import typescript from "react-syntax-highlighter/dist/esm/languages/prism/typescript";
-import remarkGfm from "remark-gfm";
 import {
-  AlertCircle, Bot, Check, ChevronDown, ChevronRight, Folder, FolderOpen,
-  Menu, MessageSquarePlus, MoreHorizontal, PanelLeftClose, Puzzle, RefreshCw, Save, Search, Send, Settings2, ShieldCheck,
-  Square, TerminalSquare, Trash2, X,
+  AlertCircle, Bot, Check, ChevronDown, Folder, FolderOpen,
+  Menu, MessageSquarePlus, MoreHorizontal, PanelLeftClose, Puzzle, RefreshCw, Search, Settings2, ShieldCheck,
+  TerminalSquare, Trash2, X,
 } from "lucide-react";
 import { useAppStore } from "./store";
 import { api } from "./lib/tauri";
-import type { ClaudeGeneralConfig, ClaudeGeneralConfigPatch, ConversationSearchResult, InstalledSkill, Message, PermissionMode, StreamEvent } from "./types";
+import { ClaudeMark } from "./components/ClaudeMark";
+import { Composer } from "./components/Composer";
+import { Markdown, MessageView } from "./components/MessageView";
+import { ConfigView, SkillsView } from "./components/SettingsViews";
+import type { ClaudeGeneralConfig, ClaudeGeneralConfigPatch, ConversationSearchResult, InstalledSkill, StreamEvent } from "./types";
 
 const EMPTY_CONFIG: ClaudeGeneralConfig = { path: "", defaultModel: "", sonnetModel: "", opusModel: "", haikuModel: "", fableModel: "" };
 const editableConfig = (config: ClaudeGeneralConfig): ClaudeGeneralConfigPatch => ({
@@ -29,114 +21,6 @@ const editableConfig = (config: ClaudeGeneralConfig): ClaudeGeneralConfigPatch =
   haikuModel: config.haikuModel,
   fableModel: config.fableModel,
 });
-
-const PERMISSIONS: { value: PermissionMode; label: string }[] = [
-  { value: "default", label: "每次确认" },
-  { value: "acceptEdits", label: "自动接受编辑" },
-  { value: "plan", label: "仅规划" },
-  { value: "dontAsk", label: "拒绝未授权工具" },
-];
-
-function ClaudeMark({ size = 18 }: { size?: number }) {
-  return <svg className="claude-mark" width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
-    <path d="M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z" fill="#D97757" fillRule="nonzero" />
-  </svg>;
-}
-
-SyntaxHighlighter.registerLanguage("bash", bash);
-SyntaxHighlighter.registerLanguage("css", css);
-SyntaxHighlighter.registerLanguage("javascript", javascript);
-SyntaxHighlighter.registerLanguage("js", javascript);
-SyntaxHighlighter.registerLanguage("json", json);
-SyntaxHighlighter.registerLanguage("markup", markup);
-SyntaxHighlighter.registerLanguage("html", markup);
-SyntaxHighlighter.registerLanguage("python", python);
-SyntaxHighlighter.registerLanguage("rust", rust);
-SyntaxHighlighter.registerLanguage("typescript", typescript);
-SyntaxHighlighter.registerLanguage("ts", typescript);
-
-function Markdown({ children }: { children: string }) {
-  return <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
-    code({ className, children, ...props }) {
-      const match = /language-(\w+)/.exec(className ?? "");
-      return match ? <SyntaxHighlighter style={oneDark} language={match[1]} PreTag="div">{String(children).replace(/\n$/, "")}</SyntaxHighlighter>
-        : <code className={className} {...props}>{children}</code>;
-    },
-  }}>{children}</ReactMarkdown>;
-}
-
-function ToolMessage({ message }: { message: Message }) {
-  const [open, setOpen] = useState(false);
-  let data: Record<string, unknown> = {};
-  try { data = JSON.parse(message.content); } catch { data = { content: message.content }; }
-  const label = message.metadata === "tool_result" ? "工具返回" : String(data.name ?? "工具调用");
-  return <div className="tool-row">
-    <button className="tool-summary" onClick={() => setOpen(!open)}>
-      {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-      <TerminalSquare size={15} /><span>{label}</span>
-    </button>
-    {open && <pre>{JSON.stringify(data, null, 2)}</pre>}
-  </div>;
-}
-
-function MessageView({ message }: { message: Message }) {
-  if (message.kind === "tool") return <ToolMessage message={message} />;
-  if (message.kind === "error") return <div className="inline-error"><AlertCircle size={16} />{message.content}</div>;
-  let durationMs: number | null = null;
-  if (message.role === "assistant" && message.metadata) {
-    try { durationMs = JSON.parse(message.metadata).durationMs ?? null; } catch { durationMs = null; }
-  }
-  const durationLabel = durationMs == null ? null : durationMs < 1000 ? `${durationMs} 毫秒` : `${(durationMs / 1000).toFixed(durationMs < 10000 ? 1 : 0)} 秒`;
-  return <article className={`message ${message.role}`}>
-    <div className="message-body">
-      <div className="message-author">{message.role === "user" ? "你" : "Claude"}</div>
-      {message.role === "assistant" ? <Markdown>{message.content}</Markdown> : <p>{message.content}</p>}
-      {durationLabel && <div className="message-duration">处理用时 {durationLabel}</div>}
-    </div>
-  </article>;
-}
-
-function SkillsView({ skills, loading }: { skills: InstalledSkill[]; loading: boolean }) {
-  if (loading) return <div className="skills-empty"><RefreshCw className="spin" size={22} /><span>正在读取已安装 Skills...</span></div>;
-  if (!skills.length) return <div className="skills-empty"><Puzzle size={25} /><h2>未检测到已安装 Skills</h2></div>;
-  return <div className="skills-scroll"><div className="skills-content">
-    <div className="skills-heading"><span>{skills.length} 个已安装</span></div>
-    <div className="skills-list">{skills.map((skill) => <article className="skill-item" key={`${skill.scope}:${skill.path}`}>
-      <div className="skill-icon"><Puzzle size={17} /></div>
-      <div className="skill-copy"><div className="skill-title"><strong>{skill.name}</strong><span className={`skill-scope ${skill.scope}`}>{skill.scope === "project" ? "项目" : skill.scope === "plugin" ? "插件" : "用户"}</span></div>
-        <p>{skill.description || "此 Skill 未提供描述。"}</p><small title={skill.path}>{skill.source} · {skill.path}</small>
-      </div>
-    </article>)}</div>
-  </div></div>;
-}
-
-function ConfigView({ config, draft, saving, saved, onChange, onSave }: {
-  config: ClaudeGeneralConfig | null;
-  draft: ClaudeGeneralConfigPatch;
-  saving: boolean;
-  saved: boolean;
-  onChange: (patch: Partial<ClaudeGeneralConfigPatch>) => void;
-  onSave: () => void;
-}) {
-  if (!config) return <div className="skills-empty"><RefreshCw className="spin" size={22} /><span>正在读取通用配置...</span></div>;
-  const fields: { key: keyof ClaudeGeneralConfigPatch; label: string; hint: string }[] = [
-    { key: "defaultModel", label: "默认模型", hint: "例如 opus[1m] 或完整模型 ID" },
-    { key: "sonnetModel", label: "Sonnet 对应模型", hint: "ANTHROPIC_DEFAULT_SONNET_MODEL" },
-    { key: "opusModel", label: "Opus 对应模型", hint: "ANTHROPIC_DEFAULT_OPUS_MODEL" },
-    { key: "haikuModel", label: "Haiku 对应模型", hint: "ANTHROPIC_DEFAULT_HAIKU_MODEL" },
-    { key: "fableModel", label: "Fable 对应模型", hint: "ANTHROPIC_DEFAULT_FABLE_MODEL" },
-  ];
-  return <div className="config-scroll"><div className="config-content">
-    <section className="config-section"><div className="config-heading"><h2>模型配置</h2></div>
-      <div className="config-form">{fields.map((field) => <label className="config-field" key={field.key}>
-        <span>{field.label}</span><input value={draft[field.key]} placeholder={field.hint} onChange={(event) => onChange({ [field.key]: event.target.value })} />
-        <small>{field.hint}</small>
-      </label>)}</div>
-    </section>
-    <div className="config-note"><Settings2 size={15} /><div><strong>用户级通用配置</strong><span>{config.path}</span></div></div>
-    <div className="config-actions"><button onClick={onSave} disabled={saving}><Save size={15} />{saving ? "保存中..." : saved ? "已保存" : "保存配置"}</button></div>
-  </div></div>;
-}
 
 function App() {
   const store = useAppStore();
@@ -307,10 +191,7 @@ function App() {
             <div ref={bottomRef} />
           </div>}
         </div>
-        <div className="composer-wrap"><div className="composer">
-          <textarea value={input} disabled={isRunning || !store.cliStatus?.found} placeholder={store.cliStatus?.found ? "描述任务，@ 文件，或让 Claude 修改代码..." : "请先安装并登录 Claude CLI"} rows={1} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); } }} />
-          <div className="composer-footer"><div className="composer-context"><div className="context-label"><Folder size={14} /><span>{active.projectPath.split(/[\\/]/).pop()}</span></div><label className="composer-permission" title="权限模式"><ShieldCheck size={13} /><select value={active.permissionMode} disabled={isRunning} onChange={(e) => store.updateActive({ permissionMode: e.target.value as PermissionMode })}>{PERMISSIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><ChevronDown size={12} /></label></div><div className="composer-actions"><label className="composer-model" title="切换模型"><Bot size={14} /><select value={active.model} disabled={isRunning} onChange={(e) => store.updateActive({ model: e.target.value })}>{modelOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><ChevronDown size={13} /></label>{isRunning ? <button className="stop-button" title="停止生成" onClick={store.stop}><Square size={14} fill="currentColor" /></button> : <button className="send-button" title="发送消息" disabled={!input.trim() || !store.cliStatus?.found} onClick={submit}><Send size={17} /></button>}</div></div>
-        </div><div className="composer-hint">Enter 发送 · Shift + Enter 换行 · Claude 可访问当前项目目录</div></div>
+        <Composer active={active} value={input} isRunning={isRunning} cliFound={!!store.cliStatus?.found} modelOptions={modelOptions} onChange={setInput} onSubmit={submit} onStop={store.stop} onUpdate={store.updateActive} />
       </>}
     </main>
 

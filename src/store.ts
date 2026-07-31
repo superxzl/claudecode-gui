@@ -102,7 +102,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const conversations = await api.listConversations();
       set({ conversations });
     } catch (error) {
-      set((state) => ({ running: { ...state.running, [conversationId]: false }, error: String(error) }));
+      set((state) => ({
+        running: { ...state.running, [conversationId]: false },
+        runStatus: { ...state.runStatus, [conversationId]: "" },
+        liveTools: { ...state.liveTools, [conversationId]: [] },
+        error: String(error),
+      }));
       const messages = await api.listMessages(conversationId).catch(() => get().messages);
       set({ messages });
     }
@@ -132,7 +137,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
     } else if (payload.event === "permission_request") {
       set({ permission: { conversationId: id, request: payload.data as PermissionRequest } });
     } else if (["completed", "cancelled", "error"].includes(payload.event)) {
-      set((state) => ({ running: { ...state.running, [id]: false }, runStatus: { ...state.runStatus, [id]: "" }, permission: state.permission?.conversationId === id ? null : state.permission }));
+      set((state) => ({
+        running: { ...state.running, [id]: false },
+        runStatus: { ...state.runStatus, [id]: "" },
+        liveTools: { ...state.liveTools, [id]: [] },
+        permission: state.permission?.conversationId === id ? null : state.permission,
+      }));
       if (payload.event === "error") set({ error: (payload.data as { message?: string }).message ?? "Claude CLI 运行失败" });
       if (get().activeId === id) set({ messages: await api.listMessages(id) });
       set({ conversations: await api.listConversations() });

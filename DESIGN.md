@@ -33,6 +33,8 @@ Tauri Rust process
 - Tauri command 执行会话 CRUD、历史内容搜索、目录选择、发送、停止、权限响应、已安装 Skills 查询和用户级模型配置读写。
 - 单一 `claude-stream` 事件通道承载带会话 ID、run ID 的结构化事件。
 - React Markdown 只渲染回答；工具信息使用独立可展开行，避免把执行日志混入正文。
+- `App.tsx` 只装配工作台状态和页面级交互；消息、输入区、Skills、配置和品牌图标位于 `src/components`，便于独立测试和演进。
+- 输入框依据 `scrollHeight` 在 67px 到 170px 之间自动增长，超过上限后在输入框内部滚动；系统明暗主题由 `prefers-color-scheme` 自动跟随，代码高亮同步切换主题。
 
 ### Rust 职责
 
@@ -46,7 +48,7 @@ Tauri Rust process
 - stdout 按行解析 Claude CLI 的 `stream-json`；stderr 仅在异常退出时作为诊断信息持久化。
 - 实时输入会在最终 `message_delta.stop_reason` 到达时关闭；CLI 随后发送 `result` 并退出，GUI 再结束“回答中”状态。不能等待 `result` 后才关闭 stdin，否则双方会互相等待。
 - 主请求使用 Claude CLI 原生 `-p <prompt>` 参数，输出仍采用 `stream-json`；只有 `default` 权限模式保留 stdin 用于 control response，其他模式发送后立即 EOF。
-- 运行监管使用双重绝对截止时间：120 秒内没有正文、工具、权限请求或最终结果等有效进展时终止，整轮最长 10 分钟。普通日志和 `system/api_retry` 只更新“上游服务重试中”状态，不会重置有效进展计时，避免网关持续报错时界面永久停在“正在思考”。
+- 运行监管使用分阶段绝对截止时间：首次有效产出最多等待 120 秒；已有正文、工具、权限请求或最终结果后，无有效进展窗口延长到 5 分钟；整轮最长 10 分钟。`system/api_retry` 只更新“上游服务重试中”状态，并把剩余等待收紧到最多 120 秒，后续重试事件不会延长截止时间。这样既避免网关持续报错时永久停在“正在思考”，也不会在大型工具结果返回后过早杀死仍在继续推理的 CLI。
 
 ### 数据模型
 
@@ -60,6 +62,7 @@ SQLite 保存的是 GUI 可复现历史；Claude CLI 自己的 session 仍是恢
 | --- | --- |
 | Tauri 2 | 安装包小、原生进程控制明确、Rust 后端适合长驻异步 I/O，权限面比通用 Node 桌面容器更窄 |
 | React 19 + TypeScript | 流式 UI 状态和组件生态成熟；项目后续接入 shadcn 组件也不需要更换框架 |
+| Vitest + Testing Library | 复用 Vite 转换链，在 jsdom 中验证组件交互、输入框尺寸逻辑和消息渲染，不需要启动 Tauri 后端 |
 | Zustand | 状态只有会话、消息和运行流，不需要 Redux 的样板和中间件体系 |
 | Rust `tokio::process` | 能直接管理 stdin/stdout、取消与退出状态；无需通过 shell 拼接用户输入 |
 | `stream-json` | Claude CLI 官方公开参数提供结构化增量消息；比解析 ANSI、光标控制和终端提示符稳定 |
@@ -76,7 +79,9 @@ SQLite 保存的是 GUI 可复现历史；Claude CLI 自己的 session 仍是恢
 ├── README.md                 # 安装、运行和产品能力
 ├── src/
 │   ├── App.tsx               # 工作台界面和流事件订阅
+│   ├── components/           # 消息、输入区、Skills、配置和品牌组件及测试
 │   ├── store.ts              # Zustand 行为与临时运行状态
+│   ├── test/setup.ts         # Vitest DOM 断言初始化
 │   ├── types.ts              # 前后端 IPC 类型
 │   ├── styles.css            # 响应式桌面视觉系统
 │   └── lib/tauri.ts          # command 调用边界
