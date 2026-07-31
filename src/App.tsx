@@ -160,6 +160,7 @@ function App() {
   const active = store.conversations.find((item) => item.id === store.activeId) ?? null;
   const isRunning = active ? !!store.running[active.id] : false;
   const stream = active ? store.streams[active.id] ?? "" : "";
+  const runStatus = active ? store.runStatus[active.id] || "正在思考..." : "正在思考...";
   const liveTools = active ? store.liveTools[active.id] ?? [] : [];
 
   useEffect(() => {
@@ -173,7 +174,7 @@ function App() {
     listen<StreamEvent>("claude-stream", (event) => store.handleStream(event.payload)).then((fn) => { dispose = fn; });
     return () => dispose?.();
   }, []);
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [store.messages, stream, liveTools]);
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [store.messages, stream, liveTools, runStatus]);
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
@@ -302,7 +303,7 @@ function App() {
           : <div className="message-column">
             {store.messages.map((message) => <MessageView key={message.id} message={message} />)}
             {liveTools.map((tool) => <div className="live-tool" key={tool.id}><span className={`tool-state ${tool.status}`} /> <TerminalSquare size={15} /><span>{tool.name}</span><small>{tool.status === "running" ? "执行中" : tool.status === "done" ? "已完成" : "失败"}</small></div>)}
-            {isRunning && <article className="message assistant streaming"><div className="message-body"><div className="message-author">Claude <span className="thinking-dot" /></div>{stream ? <Markdown>{stream}</Markdown> : <p className="muted">正在思考...</p>}</div></article>}
+            {isRunning && <article className="message assistant streaming"><div className="message-body"><div className="message-author">Claude <span className="thinking-dot" /></div>{stream ? <Markdown>{stream}</Markdown> : <p className="muted">{runStatus}</p>}</div></article>}
             <div ref={bottomRef} />
           </div>}
         </div>

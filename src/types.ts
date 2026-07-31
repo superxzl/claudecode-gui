@@ -59,7 +59,7 @@ export type ClaudeGeneralConfigPatch = Omit<ClaudeGeneralConfig, "path">;
 export interface StreamEvent {
   conversationId: string;
   runId: string;
-  event: "started" | "text_delta" | "tool_start" | "tool_result" | "permission_request" | "completed" | "error" | "cancelled";
+  event: "started" | "status" | "text_delta" | "tool_start" | "tool_result" | "permission_request" | "completed" | "error" | "cancelled";
   data: unknown;
 }
 

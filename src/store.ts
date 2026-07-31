@@ -12,6 +12,7 @@ interface AppStore {
   loading: boolean;
   running: Record<string, boolean>;
   streams: Record<string, string>;
+  runStatus: Record<string, string>;
   liveTools: Record<string, LiveTool[]>;
   permission: { conversationId: string; request: PermissionRequest } | null;
   error: string | null;
@@ -34,7 +35,7 @@ const messageNow = (conversationId: string, role: "user" | "assistant", content:
 
 export const useAppStore = create<AppStore>((set, get) => ({
   conversations: [], activeId: null, messages: [], cliStatus: null, loading: true,
-  running: {}, streams: {}, liveTools: {}, permission: null, error: null,
+  running: {}, streams: {}, runStatus: {}, liveTools: {}, permission: null, error: null,
 
   initialize: async () => {
     try {
@@ -93,6 +94,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       messages: [...state.messages, userMessage],
       running: { ...state.running, [conversationId]: true },
       streams: { ...state.streams, [conversationId]: "" },
+      runStatus: { ...state.runStatus, [conversationId]: "正在思考..." },
       liveTools: { ...state.liveTools, [conversationId]: [] }, error: null,
     }));
     try {
@@ -114,7 +116,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
   handleStream: async (payload) => {
     const id = payload.conversationId;
     if (payload.event === "started") {
-      set((state) => ({ running: { ...state.running, [id]: true } }));
+      set((state) => ({ running: { ...state.running, [id]: true }, runStatus: { ...state.runStatus, [id]: "正在思考..." } }));
+    } else if (payload.event === "status") {
+      const message = (payload.data as { message?: string }).message ?? "Claude CLI 正在处理...";
+      set((state) => ({ runStatus: { ...state.runStatus, [id]: message } }));
     } else if (payload.event === "text_delta") {
       const text = (payload.data as { text?: string }).text ?? "";
       set((state) => ({ streams: { ...state.streams, [id]: (state.streams[id] ?? "") + text } }));
@@ -127,7 +132,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     } else if (payload.event === "permission_request") {
       set({ permission: { conversationId: id, request: payload.data as PermissionRequest } });
     } else if (["completed", "cancelled", "error"].includes(payload.event)) {
-      set((state) => ({ running: { ...state.running, [id]: false }, permission: state.permission?.conversationId === id ? null : state.permission }));
+      set((state) => ({ running: { ...state.running, [id]: false }, runStatus: { ...state.runStatus, [id]: "" }, permission: state.permission?.conversationId === id ? null : state.permission }));
       if (payload.event === "error") set({ error: (payload.data as { message?: string }).message ?? "Claude CLI 运行失败" });
       if (get().activeId === id) set({ messages: await api.listMessages(id) });
       set({ conversations: await api.listConversations() });

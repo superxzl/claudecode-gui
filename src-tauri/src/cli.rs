@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::Path, process::Stdio, sync::{Arc, Mutex}, time::{Duration, Instant}};
+use std::{collections::HashMap, path::Path, process::Stdio, sync::{Arc, Mutex}, time::Duration};
 
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
@@ -6,6 +6,7 @@ use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::Command,
     sync::{mpsc, watch},
+    time::Instant,
 };
 use uuid::Uuid;
 
@@ -18,6 +19,15 @@ pub struct RunningProcess {
 }
 
 pub type RunningMap = Arc<Mutex<HashMap<String, RunningProcess>>>;
+
+const NO_PROGRESS_TIMEOUT: Duration = Duration::from_secs(120);
+const RUN_TIMEOUT: Duration = Duration::from_secs(600);
+
+#[derive(Default)]
+struct ParseOutcome {
+    close_input: bool,
+    made_progress: bool,
+}
 
 pub async fn discover_claude() -> CliStatus {
     if let Ok(path) = std::env::var("CLAUDE_DESK_CLI") {
@@ -153,6 +163,8 @@ pub async fn start_run(
         let mut cancelled = false;
         let mut stdout_open = true;
         let mut stderr_open = true;
+        let hard_deadline = started_at + RUN_TIMEOUT;
+        let mut progress_deadline = started_at + NO_PROGRESS_TIMEOUT;
 
         loop {
             tokio::select! {
@@ -167,10 +179,15 @@ pub async fn start_run(
                     let _ = stdin.write_all(input.as_bytes()).await;
                     let _ = stdin.write_all(b"\n").await;
                     let _ = stdin.flush().await;
+                    progress_deadline = Instant::now() + NO_PROGRESS_TIMEOUT;
                 }
                 line = stdout_lines.next_line(), if stdout_open => match line {
                     Ok(Some(line)) => {
-                        if parse_line(&app, &database, &task_conversation_id, &task_run_id, &line, &mut answer, &mut terminal_error) {
+                        let outcome = parse_line(&app, &database, &task_conversation_id, &task_run_id, &line, &mut answer, &mut terminal_error);
+                        if outcome.made_progress {
+                            progress_deadline = Instant::now() + NO_PROGRESS_TIMEOUT;
+                        }
+                        if outcome.close_input {
                             let _ = stdin.shutdown().await;
                         }
                     },
@@ -202,8 +219,13 @@ pub async fn start_run(
                     }
                     break;
                 }
-                _ = tokio::time::sleep(Duration::from_secs(180)) => {
-                    terminal_error = "Claude CLI 在 180 秒内没有产生任何新事件，已自动终止。请检查 CLI 登录、网络或会话恢复状态。".into();
+                _ = tokio::time::sleep_until(progress_deadline) => {
+                    terminal_error = "Claude CLI 在 120 秒内没有产生回答或其他有效进展，已自动终止。若界面曾显示上游重试，请检查推理网关、网络或 CLI 登录状态。".into();
+                    let _ = child.start_kill();
+                    break;
+                }
+                _ = tokio::time::sleep_until(hard_deadline) => {
+                    terminal_error = "Claude CLI 单次运行已超过 10 分钟，已自动终止。请缩小任务范围，或检查工具调用和推理服务状态。".into();
                     let _ = child.start_kill();
                     break;
                 }
@@ -235,12 +257,15 @@ fn parse_line(
     line: &str,
     answer: &mut String,
     terminal_error: &mut String,
-) -> bool {
-    let Ok(value) = serde_json::from_str::<Value>(line) else { return false };
+) -> ParseOutcome {
+    let Ok(value) = serde_json::from_str::<Value>(line) else { return ParseOutcome::default() };
     let event_type = value.get("type").and_then(Value::as_str).unwrap_or_default();
-    let should_close_input = should_close_stdin(&value);
+    let mut outcome = ParseOutcome { close_input: should_close_stdin(&value), made_progress: false };
     if event_type == "system" && value.get("subtype").and_then(Value::as_str) == Some("init") {
         let _ = database.mark_claude_initialized(conversation_id);
+        outcome.made_progress = true;
+    } else if let Some(message) = api_retry_status(&value) {
+        let _ = emit(app, conversation_id, run_id, "status", json!({ "message": message }));
     } else if event_type == "stream_event" {
         let event = &value["event"];
         match event.get("type").and_then(Value::as_str).unwrap_or_default() {
@@ -248,6 +273,7 @@ fn parse_line(
                 if let Some(text) = event.pointer("/delta/text").and_then(Value::as_str) {
                     answer.push_str(text);
                     let _ = emit(app, conversation_id, run_id, "text_delta", json!({ "text": text }));
+                    outcome.made_progress = true;
                 }
             }
             "content_block_start" => {
@@ -256,6 +282,7 @@ fn parse_line(
                     let data = json!({ "id": block["id"], "name": block["name"], "input": block["input"] });
                     let _ = database.insert_message(conversation_id, "tool", "tool", &data.to_string(), Some("tool_start"));
                     let _ = emit(app, conversation_id, run_id, "tool_start", data);
+                    outcome.made_progress = true;
                 }
             }
             _ => {}
@@ -267,6 +294,7 @@ fn parse_line(
                     let data = json!({ "toolUseId": item["tool_use_id"], "content": item["content"], "isError": item["is_error"] });
                     let _ = database.insert_message(conversation_id, "tool", "tool", &data.to_string(), Some("tool_result"));
                     let _ = emit(app, conversation_id, run_id, "tool_result", data);
+                    outcome.made_progress = true;
                 }
             }
         }
@@ -280,7 +308,9 @@ fn parse_line(
             "description": request.get("description").and_then(Value::as_str).unwrap_or("Claude 请求执行工具")
         });
         let _ = emit(app, conversation_id, run_id, "permission_request", data);
+        outcome.made_progress = true;
     } else if event_type == "result" {
+        outcome.made_progress = true;
         if value.get("is_error").and_then(Value::as_bool) == Some(true) {
             let errors = value
                 .get("errors")
@@ -298,7 +328,23 @@ fn parse_line(
             }
         }
     }
-    should_close_input
+    outcome
+}
+
+fn api_retry_status(value: &Value) -> Option<String> {
+    if value.get("type").and_then(Value::as_str) != Some("system")
+        || value.get("subtype").and_then(Value::as_str) != Some("api_retry")
+    {
+        return None;
+    }
+    let attempt = value.get("attempt")
+        .or_else(|| value.get("retry_attempt"))
+        .or_else(|| value.pointer("/retry/attempt"))
+        .and_then(Value::as_u64);
+    Some(match attempt {
+        Some(attempt) => format!("上游推理服务暂时不可用，Claude CLI 正在第 {attempt} 次重试..."),
+        None => "上游推理服务暂时不可用，Claude CLI 正在重试...".into(),
+    })
 }
 
 fn should_close_stdin(value: &Value) -> bool {
@@ -344,7 +390,7 @@ fn emit(app: &AppHandle, conversation_id: &str, run_id: &str, event: &str, data:
 
 #[cfg(test)]
 mod tests {
-    use super::{permission_response, should_close_stdin};
+    use super::{api_retry_status, permission_response, should_close_stdin};
     use serde_json::{json, Value};
 
     #[test]
@@ -381,6 +427,15 @@ mod tests {
             value.pointer("/response/response/updatedInput/command").and_then(Value::as_str),
             Some("cargo check")
         );
+    }
+
+    #[test]
+    fn recognizes_api_retry_without_treating_other_system_events_as_retries() {
+        assert_eq!(
+            api_retry_status(&json!({ "type": "system", "subtype": "api_retry", "attempt": 3 })).as_deref(),
+            Some("上游推理服务暂时不可用，Claude CLI 正在第 3 次重试...")
+        );
+        assert!(api_retry_status(&json!({ "type": "system", "subtype": "init" })).is_none());
     }
 
 }

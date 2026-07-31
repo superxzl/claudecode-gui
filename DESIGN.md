@@ -45,7 +45,8 @@ Tauri Rust process
 - 首轮使用预生成 UUID 的 `--session-id`，后续轮次使用 `--resume`，CLI 上下文与 GUI 会话一一映射。
 - stdout 按行解析 Claude CLI 的 `stream-json`；stderr 仅在异常退出时作为诊断信息持久化。
 - 实时输入会在最终 `message_delta.stop_reason` 到达时关闭；CLI 随后发送 `result` 并退出，GUI 再结束“回答中”状态。不能等待 `result` 后才关闭 stdin，否则双方会互相等待。
-- 主请求使用 Claude CLI 原生 `-p <prompt>` 参数，输出仍采用 `stream-json`；只有 `default` 权限模式保留 stdin 用于 control response，其他模式发送后立即 EOF。进程连续 180 秒没有任何事件会被终止并显示诊断错误。
+- 主请求使用 Claude CLI 原生 `-p <prompt>` 参数，输出仍采用 `stream-json`；只有 `default` 权限模式保留 stdin 用于 control response，其他模式发送后立即 EOF。
+- 运行监管使用双重绝对截止时间：120 秒内没有正文、工具、权限请求或最终结果等有效进展时终止，整轮最长 10 分钟。普通日志和 `system/api_retry` 只更新“上游服务重试中”状态，不会重置有效进展计时，避免网关持续报错时界面永久停在“正在思考”。
 
 ### 数据模型
 
